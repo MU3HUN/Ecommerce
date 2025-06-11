@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.Ecommerce.code.mapper.QrCodeMapper">
+    
+    <resultMap type="QrCode" id="QrCodeResult">
+        <result property="qrId"    column="qr_id"    />
+        <result property="batchId"    column="batch_id"    />
+        <result property="qrNumber"    column="qr_number"    />
+        <result property="status"    column="status"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="redeemTime"    column="redeem_time"    />
+        <result property="userName"     column="user_name"/>
+    </resultMap>
+
+    <sql id="selectQrCodeVo">
+        select qr_id, batch_id, qr_number, status, create_time, redeem_time, user_name
+        from qr_code
+    </sql>
+
+    <select id="selectQrCodeByQrNumber" resultType="com.Ecommerce.code.domain.QrCode">
+        SELECT * FROM qr_code WHERE qr_number = #{qrNumber} LIMIT 1
+    </select>
+
+    <select id="selectQrCodeList" resultType="com.Ecommerce.code.domain.QrCode">
+        SELECT
+        q.qr_id AS qrId,
+        q.batch_id AS batchId,
+        q.qr_number AS qrNumber,
+        q.status,
+        q.create_time AS createTime,
+        q.redeem_time AS redeemTime,
+        q.user_name AS userName
+        FROM qr_code q
+        <where>
+            is_deleted = 0
+            ${params.dataScope}
+            <if test="batchId != null"> AND q.batch_id = #{batchId}</if>
+            <if test="userName != null and userName != ''">
+                AND q.user_name LIKE CONCAT('%', #{userName}, '%')
+            </if>
+            <if test="qrNumber != null and qrNumber != ''">
+                AND q.qr_number LIKE CONCAT('%', #{qrNumber}, '%')
+            </if>
+            <if test="status != null and status != ''">
+                AND q.status = #{status}
+            </if>
+            <if test="params.startTime != null">
+                AND DATE(q.create_time) >= DATE(#{params.startTime})
+            </if>
+            <if test="params.endTime != null">
+                AND DATE(q.create_time) &lt;= DATE(#{params.endTime})
+            </if>
+            <if test="params.redeemStartTime != null">
+                AND q.redeem_time >= #{params.redeemStartTime}
+            </if>
+            <if test="params.redeemEndTime != null">
+                AND q.redeem_time &lt;= #{params.redeemEndTime}
+            </if>
+        </where>
+    </select>
+
+    <!-- 异常二维码（状态异常或未关联批次） -->
+    <select id="countAbnormal" resultType="int">
+        SELECT COUNT(*) FROM qr_code
+        WHERE status NOT IN ('已核销','未核销')
+           OR batch_id IS NULL
+    </select>
+
+    <select id="selectQrCodeByQrId" parameterType="Long" resultMap="QrCodeResult">
+        <include refid="selectQrCodeVo"/>
+        <where>
+            is_deleted = 0
+            AND qr_id = #{qrId}
+        </where>
+    </select>
+
+    <insert id="insertQrCode" parameterType="QrCode" useGeneratedKeys="true" keyProperty="qrId">
+        INSERT INTO qr_code
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            user_id,
+            dept_id,
+            role_id,
+            create_time,
+            batch_id,
+            qr_number,
+            status,
+            redeem_time,
+            user_name
+        </trim>
+        SELECT
+        #{userId},
+        #{deptId},
+        #{roleId},
+        #{createTime},
+        #{batchId},
+        #{qrNumber},
+        #{status},
+        #{redeemTime},
+        #{userName}
+        FROM DUAL
+        WHERE NOT EXISTS (
+        SELECT 1 FROM qr_code WHERE qr_number = #{qrNumber}
+        )
+    </insert>
+
+    <select id="existsWithQrNumber" resultType="int">
+        SELECT COUNT(1) FROM qr_code WHERE qr_number = #{qrNumber}
+    </select>
+
+    <update id="updateQrCode" parameterType="QrCode">
+        update qr_code
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="isDeleted != null">is_deleted = #{isDeleted},</if>
+            <if test="batchId != null">batch_id = #{batchId},</if>
+            <if test="qrNumber != null and qrNumber != ''">qr_number = #{qrNumber},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="redeemTime != null">redeem_time = #{redeemTime},</if>
+            <if test="userName != null">user_name = #{userName},</if>
+        </trim>
+        where qr_id = #{qrId}
+        AND qr_id IS NOT NULL
+    </update>
+
+    <delete id="deleteQrCodeByQrId" parameterType="Long">
+        delete from qr_code where qr_id = #{qrId}
+    </delete>
+
+    <update id="deleteQrCodeByQrIds">
+        UPDATE qr_code SET is_deleted = 1
+        <where>qr_id IN
+            <foreach item="id" collection="array" open="(" separator="," close=")">
+                #{id}
+            </foreach>
+        </where>
+    </update>
+
+    <update id="updateBatchIdByQrNumbers">
+        UPDATE qr_code
+        SET batch_id = #{batchId}
+        WHERE qr_number IN
+        <foreach item="number" collection="qrNumbers" open="(" separator="," close=")">
+            #{number}
+        </foreach>
+    </update>
+
+    <!-- 今日生成 -->
+    <select id="countTodayGenerated" resultType="int">
+        SELECT COUNT(qc.qr_id)
+        FROM qr_code qc
+                 JOIN qr_batch qb ON qc.batch_id = qb.batch_id
+        WHERE DATE(qb.generate_time) = CURDATE()
+    </select>
+
+    <!-- 今日核销 -->
+    <select id="countTodayRedeemed" resultType="int">
+        SELECT COUNT(*) FROM qr_code
+        WHERE status = '已核销' AND DATE(redeem_time) = CURDATE()
+    </select>
+
+    <!-- 总生成 -->
+    <select id="countTotalGenerated" resultType="int">
+        SELECT COUNT(*) FROM qr_code
+        WHERE is_deleted = 0
+    </select>
+
+    <!-- 总核销 -->
+    <select id="countTotalRedeemed" resultType="int">
+        SELECT COUNT(*) FROM qr_code WHERE status = '已核销'
+    </select>
+
+    <!-- 近7日趋势 -->
+    <select id="getSevenDayTrend" resultType="map">
+        SELECT
+            DATE(qb.generate_time) AS `date`,
+            COUNT(qc.qr_id) AS `generated`,
+            SUM(CASE WHEN qc.status = '已核销' THEN 1 ELSE 0 END) AS `redeemed`
+        FROM qr_code qc
+            JOIN qr_batch qb ON qc.batch_id = qb.batch_id
+        WHERE qb.generate_time >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+        GROUP BY DATE(qb.generate_time)
+        ORDER BY `date` ASC
+    </select>
+</mapper>

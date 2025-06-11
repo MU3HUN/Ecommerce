@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.Ecommerce.batch.mapper.QrBatchMapper">
+
+    <resultMap type="QrBatch" id="QrBatchResult">
+        <result property="batchId"    column="batch_id"    />
+        <result property="usersId"    column="users_id"    />
+        <result property="startSeq"    column="start_seq"    />
+        <result property="endSeq"    column="end_seq"    />
+        <result property="generateTime"    column="generate_time"    />
+        <result property="total" column="total"/>
+        <result property="redeemed" column="redeemed"/>
+        <result property="unredeemed" column="unredeemed"/>
+
+    </resultMap>
+
+    <!-- 所有查询添加过滤条件 -->
+    <sql id="selectQrBatchVo">
+        SELECT
+            b.batch_id,
+            b.users_id,
+            b.start_seq,
+            b.end_seq,
+            b.generate_time,
+            (CAST(b.end_seq AS UNSIGNED) - CAST(b.start_seq AS UNSIGNED) + 1) AS total,
+            COALESCE(qc.redeemed_count, 0) AS redeemed,
+            (CAST(b.end_seq AS UNSIGNED) - CAST(b.start_seq AS UNSIGNED) + 1 - COALESCE(qc.redeemed_count, 0)) AS unredeemed
+        FROM qr_batch b
+                 LEFT JOIN (
+            SELECT batch_id, COUNT(*) AS redeemed_count
+            FROM qr_code
+            WHERE status = '已核销' AND is_deleted = 0
+            GROUP BY batch_id
+        ) qc ON b.batch_id = qc.batch_id
+    </sql>
+
+    <select id="selectQrBatchList" parameterType="QrBatch" resultMap="QrBatchResult">
+        <include refid="selectQrBatchVo"/>
+        <where>
+            is_deleted = 0
+            ${params.dataScope}
+            <if test="usersId != null "> and users_id = #{usersId}</if>
+        </where>
+    </select>
+
+    <select id="selectQrBatchByBatchId" parameterType="Long" resultMap="QrBatchResult">
+        <include refid="selectQrBatchVo"/>
+        <where>
+            is_deleted = 0
+            AND b.batch_id = #{batchId}
+        </where>
+    </select>
+
+    <!-- 今日生成 -->
+    <select id="countTodayGenerated" resultType="int">
+        SELECT COALESCE(SUM(CAST(end_seq AS UNSIGNED) - CAST(start_seq AS UNSIGNED) + 1), 0)
+            FROM qr_batch
+            WHERE DATE(generate_time) = CURDATE()
+    </select>
+
+    <!-- 总生成 -->
+    <select id="countTotalGenerated" resultType="int">
+        SELECT COALESCE(SUM(CAST(end_seq AS UNSIGNED) - CAST(start_seq AS UNSIGNED) + 1), 0)
+            FROM qr_batch
+    </select>
+
+    <!-- 每日生成数据 -->
+    <select id="getDailyGenerated" resultType="map">
+        SELECT
+            DATE(generate_time) AS `date`,
+            SUM(CAST(end_seq AS UNSIGNED) - CAST(start_seq AS UNSIGNED) + 1) AS `generated`
+        FROM qr_batch
+        WHERE generate_time >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        GROUP BY DATE(generate_time)
+        ORDER BY `date` DESC
+    </select>
+
+    <insert id="insertQrBatch" parameterType="QrBatch" useGeneratedKeys="true" keyProperty="batchId">
+        insert into qr_batch
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="usersId != null">users_id,</if>
+            <if test="startSeq != null">start_seq,</if>
+            <if test="endSeq != null">end_seq,</if>
+            <if test="generateTime != null">generate_time,</if>
+            <if test="userId != null">user_id,</if>
+            <if test="deptId != null">dept_id,</if>
+            <if test="roleId != null">role_id,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="usersId != null">#{usersId},</if>
+            <if test="startSeq != null">#{startSeq},</if>
+            <if test="endSeq != null">#{endSeq},</if>
+            <if test="generateTime != null">#{generateTime},</if>
+            <if test="userId != null">#{userId},</if>
+            <if test="deptId != null">#{deptId},</if>
+            <if test="roleId != null">#{roleId},</if>
+        </trim>
+    </insert>
+
+    <update id="updateQrBatch" parameterType="QrBatch">
+        update qr_batch
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="isDeleted != null">is_deleted = #{isDeleted},</if>
+            <if test="usersId != null">users_id = #{usersId},</if>
+            <if test="startSeq != null">start_seq = #{startSeq},</if>
+            <if test="endSeq != null">end_seq = #{endSeq},</if>
+            <if test="generateTime != null">generate_time = #{generateTime},</if>
+        </trim>
+        where batch_id = #{batchId}
+    </update>
+
+    <delete id="deleteQrBatchByBatchId" parameterType="Long">
+        delete from qr_batch where batch_id = #{batchId}
+    </delete>
+
+    <update id="deleteQrBatchByBatchIds">
+        UPDATE qr_batch SET is_deleted = 1
+        WHERE batch_id IN
+        <foreach item="batchId" collection="array" open="(" separator="," close=")">
+            #{batchId}
+        </foreach>
+    </update>
+</mapper>
